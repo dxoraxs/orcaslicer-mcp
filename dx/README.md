@@ -9,10 +9,32 @@ release plus the changes below.
   with no dialog and without taking focus. Needs the dxoraxs OrcaSlicer build
   (https://github.com/dxoraxs/OrcaSlicer/releases), whose Remote API has
   `POST /api/v1/project/save`. On a stock build the tool answers `unsupported_build`.
+- `send_to_printer(start=False, filename=None, skip_check=False)`: saves the last slice like
+  `save_gcode` (recording it in the outcome store), runs `PRINT_GCODE_CHECK` if set, and uploads
+  it to Moonraker, optionally starting the print. Refuses when Klipper is not ready, and
+  refuses to start while a print runs or is paused.
+- `printer_status()`: klippy state, print state, file, progress, temperatures.
+- `sync_print_outcomes()`: pulls finished jobs from Moonraker history into the outcome store,
+  joined to their slices, so `recall_prints` shows real results; `set_print_verdict(verdict)`
+  attaches the user's words to the last print.
 - `fork_info()`: the running version (`<upstream>+dx`) and the fork tools.
+- No token in the MCP config needed: without `ORCA_API_TOKEN` the token is read from
+  OrcaSlicer.conf (`ORCA_CONF_PATH` overrides the location).
+- `ORCA_AUTOSTART=1` (macOS): when OrcaSlicer is not running, the first request starts it in
+  the background (`open -g`, no focus change) and waits up to 90 s for the API.
 
-Fork code lives in `src/orcaslicer_mcp/fork_tools.py`; `server.py` only gains one import
-line, so upstream merges rarely conflict.
+### Environment
+
+| Variable | Meaning |
+|----------|---------|
+| `MOONRAKER_URL` | e.g. `http://192.168.100.10`; Moonraker must trust this host |
+| `PRINTER_ID` | id stored with outcomes (default `biqu`) |
+| `PRINT_GCODE_CHECK` | command run as `<cmd> <gcode path>`; non-zero exit blocks the upload, stdout lines are the problems |
+| `PRINT_OUTCOMES_DIR` | where G-code copies and `outcomes.db` live |
+| `ORCA_AUTOSTART` | `1` to launch OrcaSlicer on demand (macOS) |
+
+Fork code lives in `src/orcaslicer_mcp/fork_tools.py`, `moonraker.py` and `mac_support.py`;
+`server.py` only gains one import line, so upstream merges rarely conflict.
 
 ## Updates
 
