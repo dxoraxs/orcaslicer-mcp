@@ -93,6 +93,7 @@ async def test_autostart_launches_when_not_running_and_retries(monkeypatch):
 async def test_no_launch_when_orca_runs_but_api_is_off(monkeypatch):
     host = FakeHost(running=True)
     _setup(monkeypatch, host)
+    monkeypatch.setattr(ms, "READY_TIMEOUT", 0.05)
     respx.get(f"{B}/api/v1/status").mock(side_effect=httpx.ConnectError("refused"))
     async with OrcaClient(load_config()) as c:
         with pytest.raises(NotReachable) as e:
