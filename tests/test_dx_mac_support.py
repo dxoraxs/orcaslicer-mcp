@@ -68,6 +68,7 @@ class FakeHost:
 
 
 def _setup(monkeypatch, host):
+    ms.install_autostart()  # normally done when fork_tools is imported
     monkeypatch.setenv("ORCA_API_TOKEN", "tok")
     monkeypatch.setenv("ORCA_API_URL", B)
     monkeypatch.setenv("ORCA_AUTOSTART", "1")
