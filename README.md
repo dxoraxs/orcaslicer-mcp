@@ -1,3 +1,17 @@
+> [!IMPORTANT]
+> **dxoraxs fork.** This is [MaxEllis/orcaslicer-mcp](https://github.com/MaxEllis/orcaslicer-mcp) plus the additions below. A daily workflow merges every new upstream release, runs the tests and publishes `v<upstream>-dx.<n>`; anything that needs a human opens an issue. Details: [`dx/README.md`](dx/README.md).
+>
+> | Area | Tools | Notes |
+> |------|-------|-------|
+> | Projects | `save_project`, `open_project`, `new_project` | save the open project as .3mf at any path (folders created), open a .3mf as a full project, start empty; no dialogs, unsaved changes are refused unless `discard=true` |
+> | Plates | `list_plates`, `add_plate`, `select_plate`, `delete_plate`, `move_object_to_plate` | multi-plate projects; slicing works on the current plate |
+> | Printer (Klipper/Moonraker) | `send_to_printer`, `printer_status` | upload the last slice and optionally start it; refuses when Klipper is not ready or busy; optional G-code check command (`PRINT_GCODE_CHECK`) must pass |
+> | Print history | `sync_print_outcomes`, `set_print_verdict` | real results (status, duration, filament) from Moonraker history joined to their slices, so `recall_prints` shows how a model actually printed |
+> | Desktop | | token read from OrcaSlicer.conf when `ORCA_API_TOKEN` is unset; `ORCA_AUTOSTART=1` launches OrcaSlicer in the background on macOS (`open -g`, no focus change) |
+> | Info | `fork_info` | running version (`<upstream>+dx`) and fork tools |
+>
+> Projects and plates need the [dxoraxs OrcaSlicer build](https://github.com/dxoraxs/OrcaSlicer/releases/tag/orca-dx); a stock build answers `unsupported_build`. Run this fork with `uvx --from git+https://github.com/dxoraxs/orcaslicer-mcp orcaslicer-mcp`.
+
 # OrcaSlicer MCP
 
 [![PyPI](https://img.shields.io/pypi/v/orcaslicer-mcp)](https://pypi.org/project/orcaslicer-mcp/)
