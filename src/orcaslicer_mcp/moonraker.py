@@ -49,7 +49,8 @@ class Moonraker:
         try:
             resp = await self._http.request(method, path, **kw)
         except httpx.TransportError as e:
-            raise MoonrakerError("printer_unreachable", f"{self._url}: {e}") from e
+            raise MoonrakerError("printer_unreachable",
+                                 f"{self._url}: {type(e).__name__} {e}".strip()) from e
         if resp.status_code >= 400:
             try:
                 msg = resp.json().get("error", {}).get("message", "")

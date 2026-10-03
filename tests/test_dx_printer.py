@@ -120,6 +120,7 @@ async def test_printer_unreachable(monkeypatch, tmp_path):
     respx.get(f"{M}/printer/info").mock(side_effect=httpx.ConnectError("down"))
     out = await ft.send_to_printer(filename="box.gcode")
     assert out["error"] == "printer_unreachable"
+    assert "ConnectError" in out["detail"]
 
 
 async def test_not_configured(monkeypatch):
