@@ -87,6 +87,99 @@ async def _run_gcode_check(path: str) -> list[str] | None:
     return lines or [f"gcode check exited {proc.returncode}"]
 
 
+_HINTS = {
+    "unsaved_changes": "the open project has unsaved changes: save_project first, or pass discard=true",
+    "plate_not_empty": "move its objects away (move_object_to_plate) or delete them first",
+    "last_plate": "a project always keeps one plate",
+}
+
+
+async def _orca(method: str, path: str, body: dict | None = None, timeout: float | None = None) -> dict:
+    """Call a dxoraxs-only OrcaSlicer route; map refusals to {"error", "hint"}."""
+    try:
+        async with _client() as c:
+            return await c._request(method, path, json=body, timeout=timeout)
+    except NotFound as e:
+        if e.route_missing:
+            return {"error": "unsupported_build",
+                    "hint": f"this OrcaSlicer lacks the route; install the dxoraxs build from {ORCA_FORK_RELEASES}"}
+        return {"error": str(e)}
+    except (Conflict, Validation, BadRequest) as e:
+        code = str(e)
+        out = {"error": code}
+        if code in _HINTS:
+            out["hint"] = _HINTS[code]
+        return out
+    except ApiError as e:
+        return _err(e)
+
+
+@mcp.tool()
+async def open_project(
+    path: Annotated[str, Field(description="Absolute path of a .3mf project on the OrcaSlicer host.")],
+    discard: Annotated[bool, Field(description=(
+        "Throw away unsaved changes of the open project. Only when the user agreed."))] = False,
+) -> dict:
+    """Open a .3mf as a project (objects, plates, per-object settings, project presets), like
+    File > Open Project, without dialogs. Refuses with unsaved_changes while the open project has
+    unsaved edits unless discard=true. Unlike load_model, which only adds geometry to the plate."""
+    full = os.path.expanduser(path)
+    if not os.path.isfile(full):
+        return {"error": "file_not_found", "path": full}
+    return await _orca("POST", "/api/v1/project/open", {"path": full, "discard": discard}, timeout=130.0)
+
+
+@mcp.tool()
+async def new_project(
+    discard: Annotated[bool, Field(description=(
+        "Throw away unsaved changes of the open project. Only when the user agreed."))] = False,
+) -> dict:
+    """Start an empty project, like File > New Project, without dialogs. Refuses with
+    unsaved_changes while there are unsaved edits unless discard=true."""
+    return await _orca("POST", "/api/v1/project/new", {"discard": discard}, timeout=70.0)
+
+
+@mcp.tool()
+async def list_plates() -> dict:
+    """Plates of the project: index, name, the objects on each (ids as in list_objects), whether
+    its slice is valid, and which plate is current. slice/slice_and_wait work on the current plate."""
+    return await _orca("GET", "/api/v1/plates")
+
+
+@mcp.tool()
+async def add_plate(
+    name: Annotated[str | None, Field(description="Optional plate name.")] = None,
+) -> dict:
+    """Add an empty plate and make it current. Returns the plate list plus `added` (its index)."""
+    return await _orca("POST", "/api/v1/plates", {"name": name} if name else {})
+
+
+@mcp.tool()
+async def select_plate(
+    index: Annotated[int, Field(description="Plate index from list_plates (0-based).")],
+) -> dict:
+    """Make a plate current, so slice/get_gcode/render_plate/save_gcode act on it."""
+    return await _orca("POST", "/api/v1/plates/select", {"index": index})
+
+
+@mcp.tool()
+async def delete_plate(
+    index: Annotated[int, Field(description="Plate index from list_plates (0-based).")],
+) -> dict:
+    """Delete an empty plate. Refuses a plate with objects (plate_not_empty) and the last plate."""
+    return await _orca("DELETE", f"/api/v1/plates/{index}")
+
+
+@mcp.tool()
+async def move_object_to_plate(
+    object_id: Annotated[int, Field(description="Object id from list_objects.")],
+    index: Annotated[int, Field(description="Target plate index from list_plates (0-based).")],
+) -> dict:
+    """Move an object (all its instances) onto another plate, keeping its position relative to
+    the plate. Run arrange_plate afterwards if it overlaps something there."""
+    return await _orca("POST", f"/api/v1/objects/{object_id}/plate", {"index": index})
+
+
 def _moonraker_missing() -> dict:
     return {"error": "moonraker_not_configured",
             "hint": "set MOONRAKER_URL (e.g. http://192.168.100.10) in the MCP server env"}
@@ -217,12 +310,21 @@ async def fork_info() -> dict:
     fork, and the fork-only tools it adds."""
     return {"version": f"{_VERSION}+dx", "upstream_version": _VERSION, "fork": FORK,
             "repo": FORK_REPO, "orca_build": ORCA_FORK_RELEASES,
-            "fork_tools": ["save_project", "send_to_printer", "printer_status",
-                           "sync_print_outcomes", "set_print_verdict", "fork_info"]}
+            "fork_tools": ["save_project", "open_project", "new_project", "list_plates",
+                           "add_plate", "select_plate", "delete_plate", "move_object_to_plate",
+                           "send_to_printer", "printer_status", "sync_print_outcomes",
+                           "set_print_verdict", "fork_info"]}
 
 
 _TOOL_ANNOTATIONS.update({
     "save_project": ("Save project (.3mf) to a path", False, False),
+    "open_project": ("Open a .3mf project", False, True),
+    "new_project": ("New empty project", False, True),
+    "list_plates": ("List plates", True, False),
+    "add_plate": ("Add plate", False, False),
+    "select_plate": ("Select plate", False, False),
+    "delete_plate": ("Delete empty plate", False, True),
+    "move_object_to_plate": ("Move object to plate", False, False),
     "send_to_printer": ("Send G-code to the printer (optionally start)", False, False),
     "printer_status": ("Printer status (Moonraker)", True, False),
     "sync_print_outcomes": ("Sync print results from Moonraker", False, False),

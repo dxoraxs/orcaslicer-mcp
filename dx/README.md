@@ -9,6 +9,12 @@ release plus the changes below.
   with no dialog and without taking focus. Needs the dxoraxs OrcaSlicer build
   (https://github.com/dxoraxs/OrcaSlicer/releases), whose Remote API has
   `POST /api/v1/project/save`. On a stock build the tool answers `unsupported_build`.
+- `open_project(path, discard=False)`, `new_project(discard=False)`: open a .3mf as a project
+  or start an empty one, without dialogs; unsaved changes are refused unless `discard=true`.
+- `list_plates`, `add_plate(name)`, `select_plate(index)`, `delete_plate(index)` (empty plates
+  only), `move_object_to_plate(object_id, index)`. Slicing works on the current plate.
+- All of the above need the dxoraxs OrcaSlicer build (rolling release `orca-dx`); a stock build
+  answers `unsupported_build`.
 - `send_to_printer(start=False, filename=None, skip_check=False)`: saves the last slice like
   `save_gcode` (recording it in the outcome store), runs `PRINT_GCODE_CHECK` if set, and uploads
   it to Moonraker, optionally starting the print. Refuses when Klipper is not ready, and
