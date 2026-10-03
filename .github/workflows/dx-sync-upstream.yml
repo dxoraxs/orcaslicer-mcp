@@ -1,0 +1,67 @@
+# dxoraxs fork: once a day merge the newest MaxEllis release tag into main, run the tests and,
+# when green, push and start dx-release. A conflict, red tests or a refused push (upstream
+# changed .github/workflows) opens an issue instead: merge locally with dx/sync-upstream.sh.
+name: dx sync upstream
+
+on:
+  schedule:
+    - cron: '41 4 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+      - name: Merge newest upstream release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          git config user.name "dx-sync[bot]"
+          git config user.email "dx-sync@users.noreply.github.com"
+          git remote add upstream https://github.com/MaxEllis/orcaslicer-mcp.git
+          git fetch -q upstream 'refs/tags/v*:refs/tags/v*'
+          latest=$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -v -- '-dx\.' | head -1)
+          echo "newest upstream release: $latest"
+          if git merge-base --is-ancestor "$latest" HEAD; then
+            echo "main already contains $latest"; exit 0
+          fi
+          open_issue() {
+            title="Upstream $latest needs a manual merge"
+            if [ -z "$(gh issue list --state open --search "\"$title\" in:title" --json number -q '.[].number')" ]; then
+              gh issue create --title "$title" --body "$1
+
+          Merge locally: \`dx/sync-upstream.sh\` in the clone, fix, run \`uv run --extra dev pytest -q\`, push main."
+            fi
+          }
+          if ! git merge --no-edit "$latest"; then
+            files=$(git diff --name-only --diff-filter=U | sed 's/^/- /')
+            git merge --abort
+            open_issue "Merging $latest into main conflicts in:
+          $files"
+            exit 0
+          fi
+          if ! uv run --extra dev pytest -q > pytest.log 2>&1; then
+            open_issue "Merged $latest cleanly but the tests fail:
+
+          \`\`\`
+          $(tail -30 pytest.log)
+          \`\`\`"
+            exit 0
+          fi
+          if ! git push origin main "refs/tags/$latest"; then
+            open_issue "Merged $latest cleanly and tests pass, but the push was refused (it most likely changes .github/workflows, which the Actions token may not push)."
+            exit 0
+          fi
+          gh workflow run dx-release.yml --ref main
+          echo "merged $latest, tests green, release started"

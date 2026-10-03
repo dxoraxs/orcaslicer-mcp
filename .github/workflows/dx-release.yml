@@ -1,0 +1,41 @@
+# dxoraxs fork: test main and publish a release v<upstream>-dx.<n> for it. Runs on our pushes
+# to main and is started by dx-sync-upstream after it merges a new upstream release (pushes
+# made with the Actions token do not start push workflows).
+name: dx release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dx-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+      - name: Tests
+        run: uv run --extra dev pytest -q
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-dx.*' HEAD)
+          n=$(git rev-list --count "${base}..HEAD")
+          tag="${base}-dx.${n}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag already released"; exit 0
+          fi
+          notes=$(printf 'orcaslicer-mcp %s (MaxEllis) plus the dxoraxs fork changes:\n\n%s\n\nUpstream notes: https://github.com/MaxEllis/orcaslicer-mcp/releases/tag/%s' \
+            "$base" "$(git log --no-merges --format='- %s' "${base}..HEAD")" "$base")
+          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --notes "$notes" --latest

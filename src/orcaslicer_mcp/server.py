@@ -1237,6 +1237,8 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "delete_preset": ("Delete preset", False, True),
 }
 
+from . import fork_tools  # noqa: E402,F401  dxoraxs fork: registers fork-only tools
+
 
 def _apply_tool_annotations() -> None:
     for name, tool in mcp._tool_manager._tools.items():
