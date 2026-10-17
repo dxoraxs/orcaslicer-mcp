@@ -164,3 +164,15 @@ async def test_set_print_verdict(monkeypatch, tmp_path):
     await ft.sync_print_outcomes()
     out = await ft.set_print_verdict("углы отслоились")
     assert out["human_verdict"] == "углы отслоились"
+
+
+@respx.mock
+async def test_save_gcode_alone_records_this_printer(monkeypatch, tmp_path):
+    # upstream save_gcode calls record_slice without printer_id; its default is upstream's printer
+    _env(monkeypatch, tmp_path)
+    monkeypatch.setenv("PRINTER_ID", "biqu")
+    from orcaslicer_mcp import server as srv
+    ft._ensure_store()
+    saved = await srv.save_gcode("box.gcode")
+    assert saved["outcome_recorded"]
+    assert oc.recall(model_name="box")[0]["printer_id"] == "biqu"

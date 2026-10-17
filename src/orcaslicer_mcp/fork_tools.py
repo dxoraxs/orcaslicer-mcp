@@ -25,6 +25,23 @@ from . import mac_support as _mac
 _mac.apply_env_defaults()
 _mac.install_autostart()
 
+
+def _with_this_printer(fn):
+    """Upstream's outcome writers default printer_id to upstream's own printer ("swx2"), and
+    upstream save_gcode calls record_slice without one. Default it to PRINTER_ID instead, read
+    per call; server.py looks the function up on the module, so rebinding it here is enough."""
+    fn = getattr(fn, "__wrapped__", fn)  # a module reload must not stack wrappers
+
+    def wrapper(*args, printer_id: str | None = None, **kwargs):
+        return fn(*args, printer_id=printer_id or _mr.printer_id(), **kwargs)
+    wrapper.__wrapped__ = fn
+    wrapper.__doc__ = fn.__doc__
+    return wrapper
+
+
+_outcomes.record_slice = _with_this_printer(_outcomes.record_slice)
+_outcomes.record_outcome = _with_this_printer(_outcomes.record_outcome)
+
 FORK = "dxoraxs"
 FORK_REPO = "https://github.com/dxoraxs/orcaslicer-mcp"
 ORCA_FORK_RELEASES = "https://github.com/dxoraxs/OrcaSlicer/releases"
@@ -232,11 +249,6 @@ async def send_to_printer(
             saved = await _srv.save_gcode(filename)
             if "error" in saved:
                 return saved
-            if saved.get("outcome_row_id"):
-                # upstream save_gcode records with the store's default printer id
-                with closing(_outcomes.connect()) as conn:
-                    conn.execute("UPDATE prints SET printer_id=? WHERE id=?",
-                                 (_mr.printer_id(), saved["outcome_row_id"]))
             if not skip_check:
                 problems = await _run_gcode_check(saved["path"])
                 if problems:
