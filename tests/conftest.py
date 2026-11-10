@@ -17,3 +17,38 @@ def gcode_fixture():
                 cache[name] = fh.read()
         return cache[name]
     return load
+
+
+@pytest.fixture(autouse=True)
+def _isolate_outcome_store(monkeypatch, tmp_path_factory):
+    """No test may touch a real outcome store: the default location points at a temp dir.
+    Tests that want a store set PRINT_OUTCOMES_DIR themselves."""
+    from orcaslicer_mcp import outcomes
+    base = tmp_path_factory.mktemp("outcomes")
+    monkeypatch.setattr(outcomes, "DEFAULT_DIR", base / "default")
+    monkeypatch.delenv("PRINT_OUTCOMES_DIR", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_printer_state(monkeypatch, tmp_path_factory):
+    """The printer tools remember the last printer on disk and cache probes in memory.
+    No test may read or write the real file or inherit another test's cache or settings."""
+    import importlib
+    from orcaslicer_mcp.printer import target
+    monkeypatch.setattr(target, "REMEMBERED_PATH", tmp_path_factory.mktemp("printer") / "printer.json")
+    for name in ("ORCA_PRINTER_URL", "ORCA_PRINTER_API_KEY", "ORCA_PRINTER_ID"):
+        monkeypatch.delenv(name, raising=False)
+    try:
+        importlib.import_module("orcaslicer_mcp.printer.target")._PROBE_CACHE.clear()
+    except (ImportError, AttributeError):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _fresh_status_cache():
+    """The sensitive-key decision keeps /status for a few seconds per address; no test may
+    inherit another test's answer."""
+    from orcaslicer_mcp import client
+    client._STATUS_SEEN.clear()
+    yield
+    client._STATUS_SEEN.clear()

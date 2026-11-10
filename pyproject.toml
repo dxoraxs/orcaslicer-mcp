@@ -1,6 +1,6 @@
 [project]
 name = "orcaslicer-mcp"
-version = "0.1.14"
+version = "0.1.21"
 description = "Work a running OrcaSlicer from Claude or any MCP client: load models, tune settings, slice, and understand the result through per-feature breakdowns, setting explanations, and physics checks"
 readme = "README.md"
 license = { text = "AGPL-3.0-only" }
@@ -15,7 +15,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Printing",
 ]
-dependencies = ["mcp>=2.2,<3", "httpx>=0.27", "websockets>=12"]
+dependencies = ["mcp>=2.2,<3", "anyio>=4.9", "httpx>=0.27,<1", "websockets>=12"]
 
 [project.urls]
 Homepage = "https://github.com/maxellis/orcaslicer-mcp"
