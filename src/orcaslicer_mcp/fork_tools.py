@@ -1,8 +1,8 @@
-"""Tools that exist only in the dxoraxs fork. Kept out of server.py so upstream merges touch
-a single import line there. Imported by server.py after _TOOL_ANNOTATIONS is defined.
+"""Tools that exist only in the dxoraxs fork. server.py stays byte-identical to upstream:
+the console script points at main() here, which registers these tools and runs the server.
 
-save_project needs the dxoraxs OrcaSlicer build (github.com/dxoraxs/OrcaSlicer), whose
-Remote API adds POST /api/v1/project/save; stock MCP builds answer 404 for it."""
+Projects and plates were fork tools until upstream 0.1.15-0.1.18 shipped its own; they are
+upstream's now."""
 from __future__ import annotations
 
 import asyncio
@@ -26,63 +26,14 @@ _mac.apply_env_defaults()
 _mac.install_autostart()
 
 
-def _with_this_printer(fn):
-    """Upstream's outcome writers default printer_id to upstream's own printer ("swx2"), and
-    upstream save_gcode calls record_slice without one. Default it to PRINTER_ID instead, read
-    per call; server.py looks the function up on the module, so rebinding it here is enough."""
-    fn = getattr(fn, "__wrapped__", fn)  # a module reload must not stack wrappers
-
-    def wrapper(*args, printer_id: str | None = None, **kwargs):
-        return fn(*args, printer_id=printer_id or _mr.printer_id(), **kwargs)
-    wrapper.__wrapped__ = fn
-    wrapper.__doc__ = fn.__doc__
-    return wrapper
-
-
-_outcomes.record_slice = _with_this_printer(_outcomes.record_slice)
-_outcomes.record_outcome = _with_this_printer(_outcomes.record_outcome)
+# Upstream names the printer in the outcome store by ORCA_PRINTER_ID (save_gcode,
+# list_print_history); our config says PRINTER_ID. One name for both, so rows agree.
+if os.environ.get("PRINTER_ID", "").strip():
+    os.environ.setdefault("ORCA_PRINTER_ID", os.environ["PRINTER_ID"].strip())
 
 FORK = "dxoraxs"
 FORK_REPO = "https://github.com/dxoraxs/orcaslicer-mcp"
 ORCA_FORK_RELEASES = "https://github.com/dxoraxs/OrcaSlicer/releases"
-
-
-@mcp.tool()
-async def save_project(
-    path: Annotated[str | None, Field(description=(
-        "Absolute path of the .3mf to write on the OrcaSlicer host, e.g. "
-        "'/Users/me/prints/box/box.3mf' ('~' is expanded, '.3mf' is appended when missing, "
-        "missing folders are created). Omit to save the already-saved project in place."))] = None,
-    overwrite: Annotated[bool, Field(description="Replace an existing file at path.")] = False,
-) -> dict:
-    """Save the open OrcaSlicer project (plate, objects, per-object settings, painting, presets)
-    as a .3mf project file, without any dialog. OrcaSlicer then treats that file as the current
-    project (get_status.project shows it, and later saves go there). Refuses an existing file
-    unless overwrite=true. Needs the dxoraxs OrcaSlicer build."""
-    body: dict = {"overwrite": overwrite}
-    if path:
-        body["path"] = os.path.expanduser(path)
-    try:
-        async with _client() as c:
-            return await c._request("POST", "/api/v1/project/save", json=body, timeout=130.0)
-    except Conflict as e:
-        code = str(e)
-        out = {"error": code}
-        if code == "exists":
-            out.update(path=body.get("path"), hint="pass overwrite=true to replace it")
-        elif code == "no_project_path":
-            out["hint"] = "the project has never been saved; pass a path"
-        return out
-    except NotFound as e:
-        if e.route_missing:
-            return {"error": "unsupported_build",
-                    "hint": f"this OrcaSlicer has no project-save API; install the dxoraxs build "
-                            f"from {ORCA_FORK_RELEASES}"}
-        return _err(e)
-    except (Validation, BadRequest) as e:
-        return {"error": str(e)}
-    except ApiError as e:
-        return _err(e)
 
 
 async def _run_gcode_check(path: str) -> list[str] | None:
@@ -111,92 +62,6 @@ _HINTS = {
 }
 
 
-async def _orca(method: str, path: str, body: dict | None = None, timeout: float | None = None) -> dict:
-    """Call a dxoraxs-only OrcaSlicer route; map refusals to {"error", "hint"}."""
-    try:
-        async with _client() as c:
-            return await c._request(method, path, json=body, timeout=timeout)
-    except NotFound as e:
-        if e.route_missing:
-            return {"error": "unsupported_build",
-                    "hint": f"this OrcaSlicer lacks the route; install the dxoraxs build from {ORCA_FORK_RELEASES}"}
-        return {"error": str(e)}
-    except (Conflict, Validation, BadRequest) as e:
-        code = str(e)
-        out = {"error": code}
-        if code in _HINTS:
-            out["hint"] = _HINTS[code]
-        return out
-    except ApiError as e:
-        return _err(e)
-
-
-@mcp.tool()
-async def open_project(
-    path: Annotated[str, Field(description="Absolute path of a .3mf project on the OrcaSlicer host.")],
-    discard: Annotated[bool, Field(description=(
-        "Throw away unsaved changes of the open project. Only when the user agreed."))] = False,
-) -> dict:
-    """Open a .3mf as a project (objects, plates, per-object settings, project presets), like
-    File > Open Project, without dialogs. Refuses with unsaved_changes while the open project has
-    unsaved edits unless discard=true. Unlike load_model, which only adds geometry to the plate."""
-    full = os.path.expanduser(path)
-    if not os.path.isfile(full):
-        return {"error": "file_not_found", "path": full}
-    return await _orca("POST", "/api/v1/project/open", {"path": full, "discard": discard}, timeout=130.0)
-
-
-@mcp.tool()
-async def new_project(
-    discard: Annotated[bool, Field(description=(
-        "Throw away unsaved changes of the open project. Only when the user agreed."))] = False,
-) -> dict:
-    """Start an empty project, like File > New Project, without dialogs. Refuses with
-    unsaved_changes while there are unsaved edits unless discard=true."""
-    return await _orca("POST", "/api/v1/project/new", {"discard": discard}, timeout=70.0)
-
-
-@mcp.tool()
-async def list_plates() -> dict:
-    """Plates of the project: index, name, the objects on each (ids as in list_objects), whether
-    its slice is valid, and which plate is current. slice/slice_and_wait work on the current plate."""
-    return await _orca("GET", "/api/v1/plates")
-
-
-@mcp.tool()
-async def add_plate(
-    name: Annotated[str | None, Field(description="Optional plate name.")] = None,
-) -> dict:
-    """Add an empty plate and make it current. Returns the plate list plus `added` (its index)."""
-    return await _orca("POST", "/api/v1/plates", {"name": name} if name else {})
-
-
-@mcp.tool()
-async def select_plate(
-    index: Annotated[int, Field(description="Plate index from list_plates (0-based).")],
-) -> dict:
-    """Make a plate current, so slice/get_gcode/render_plate/save_gcode act on it."""
-    return await _orca("POST", "/api/v1/plates/select", {"index": index})
-
-
-@mcp.tool()
-async def delete_plate(
-    index: Annotated[int, Field(description="Plate index from list_plates (0-based).")],
-) -> dict:
-    """Delete an empty plate. Refuses a plate with objects (plate_not_empty) and the last plate."""
-    return await _orca("DELETE", f"/api/v1/plates/{index}")
-
-
-@mcp.tool()
-async def move_object_to_plate(
-    object_id: Annotated[int, Field(description="Object id from list_objects.")],
-    index: Annotated[int, Field(description="Target plate index from list_plates (0-based).")],
-) -> dict:
-    """Move an object (all its instances) onto another plate, keeping its position relative to
-    the plate. Run arrange_plate afterwards if it overlaps something there."""
-    return await _orca("POST", f"/api/v1/objects/{object_id}/plate", {"index": index})
-
-
 def _moonraker_missing() -> dict:
     return {"error": "moonraker_not_configured",
             "hint": "set MOONRAKER_URL (e.g. http://192.168.100.10) in the MCP server env"}
@@ -218,7 +83,6 @@ async def _sync_outcomes(m: _mr.Moonraker) -> int:
     return n
 
 
-@mcp.tool()
 async def send_to_printer(
     start: Annotated[bool, Field(description=(
         "Start printing right after the upload. Refused while the printer is printing or paused."))] = False,
@@ -266,7 +130,6 @@ async def send_to_printer(
             "outcome_recorded": saved.get("outcome_recorded")}
 
 
-@mcp.tool()
 async def printer_status() -> dict:
     """Klipper/Moonraker state of the printer: klippy state, print state, current file and
     progress, extruder and bed temperatures. Read-only. Needs MOONRAKER_URL."""
@@ -287,7 +150,6 @@ async def printer_status() -> dict:
             "extruder": st.get("extruder"), "heater_bed": st.get("heater_bed")}
 
 
-@mcp.tool()
 async def sync_print_outcomes() -> dict:
     """Pull finished jobs from the printer's Moonraker history into the print-outcome store
     (result, duration, filament), joined to the slice that send_to_printer/save_gcode recorded.
@@ -303,7 +165,6 @@ async def sync_print_outcomes() -> dict:
     return {"recorded": n, "store": str(_outcomes.db_path())}
 
 
-@mcp.tool()
 async def set_print_verdict(
     verdict: Annotated[str, Field(description="What the user said about the print, e.g. 'corners lifted'.")],
     gcode_filename: Annotated[str | None, Field(description=(
@@ -316,35 +177,32 @@ async def set_print_verdict(
     return _outcomes.set_verdict(verdict, gcode_filename)
 
 
-@mcp.tool()
 async def fork_info() -> dict:
     """Which build of this MCP server is running: the upstream version it is based on, the
     fork, and the fork-only tools it adds."""
     return {"version": f"{_VERSION}+dx", "upstream_version": _VERSION, "fork": FORK,
             "repo": FORK_REPO, "orca_build": ORCA_FORK_RELEASES,
-            "fork_tools": ["save_project", "open_project", "new_project", "list_plates",
-                           "add_plate", "select_plate", "delete_plate", "move_object_to_plate",
-                           "send_to_printer", "printer_status", "sync_print_outcomes",
-                           "set_print_verdict", "fork_info"]}
+            "fork_tools": [fn.__name__ for fn in _FORK_TOOLS]}
 
 
-_TOOL_ANNOTATIONS.update({
-    "save_project": ("Save project (.3mf) to a path", False, False),
-    "open_project": ("Open a .3mf project", False, True),
-    "new_project": ("New empty project", False, True),
-    "list_plates": ("List plates", True, False),
-    "add_plate": ("Add plate", False, False),
-    "select_plate": ("Select plate", False, False),
-    "delete_plate": ("Delete empty plate", False, True),
-    "move_object_to_plate": ("Move object to plate", False, False),
-    "send_to_printer": ("Send G-code to the printer (optionally start)", False, False),
-    "printer_status": ("Printer status (Moonraker)", True, False),
-    "sync_print_outcomes": ("Sync print results from Moonraker", False, False),
-    "set_print_verdict": ("Record verdict on a print", False, False),
-    "fork_info": ("Fork build info", True, False),
-})
+_FORK_TOOLS = {
+    send_to_printer: ("Send G-code to the printer (optionally start)", False, False),
+    printer_status: ("Printer status (Moonraker)", True, False),
+    sync_print_outcomes: ("Sync print results from Moonraker", False, False),
+    set_print_verdict: ("Record verdict on a print", False, False),
+    fork_info: ("Fork build info", True, False),
+}
 
-# Normally server.py imports this module mid-way and annotates every tool afterwards. If this
-# module is imported first, server.py has already annotated before these tools existed: redo it.
-if hasattr(_srv, "_apply_tool_annotations"):
+
+def register() -> None:
+    """Add the fork tools to upstream's server. Idempotent."""
+    for fn, annotation in _FORK_TOOLS.items():
+        if fn.__name__ not in _TOOL_ANNOTATIONS:
+            mcp.tool()(fn)
+            _TOOL_ANNOTATIONS[fn.__name__] = annotation
     _srv._apply_tool_annotations()
+
+
+def main() -> None:
+    register()
+    _srv.main()

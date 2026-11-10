@@ -1,6 +1,7 @@
 """Fork-only (dxoraxs): send_to_printer, printer_status, sync_print_outcomes, set_print_verdict
 against a mocked Moonraker (and a mocked OrcaSlicer for the slice)."""
 import sys
+import time
 
 import httpx
 import respx
@@ -27,6 +28,8 @@ def _env(m, tmp_path, check: str | None = None):
     respx.get(f"{B}/api/v1/objects").mock(return_value=httpx.Response(200, json=OBJS))
     respx.get(url__regex=rf"{B}/api/v1/config.*").mock(
         return_value=httpx.Response(200, json={"config": {"layer_height": "0.2"}}))
+    respx.get(f"{B}/api/v1/slice/status").mock(return_value=httpx.Response(200, json={"state": "done", "stats": {}}))
+    respx.get(f"{B}/api/v1/status").mock(return_value=httpx.Response(200, json={"presets": {"printer": "Manta"}}))
 
 
 def _printer(state="ready", print_state="standby"):
@@ -139,10 +142,12 @@ async def test_printer_status(monkeypatch, tmp_path):
 @respx.mock
 async def test_sync_outcomes_joins_history_to_slice(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path); _printer()
+    monkeypatch.setenv("ORCA_PRINTER_ID", "biqu")  # what the fork derives from PRINTER_ID at import
     _upload(False)
     await ft.send_to_printer(filename="box.gcode")
-    job = {"job_id": "000A", "filename": "box.gcode", "status": "completed", "end_time": 1000.0,
-           "total_duration": 3600.0, "metadata": {"filament_weight_total": 12.5}}
+    # upstream joins a job only to a slice saved before the job started
+    job = {"job_id": "000A", "filename": "box.gcode", "status": "completed",
+           "start_time": time.time() + 60, "end_time": time.time() + 3660, "total_duration": 3600.0, "metadata": {"filament_weight_total": 12.5}}
     running = {"job_id": "000B", "filename": "next.gcode", "status": "in_progress"}
     respx.get(url__regex=rf"{M}/server/history/list.*").mock(return_value=httpx.Response(
         200, json={"result": {"count": 2, "jobs": [job, running]}}))
@@ -168,9 +173,12 @@ async def test_set_print_verdict(monkeypatch, tmp_path):
 
 @respx.mock
 async def test_save_gcode_alone_records_this_printer(monkeypatch, tmp_path):
-    # upstream save_gcode calls record_slice without printer_id; its default is upstream's printer
+    # upstream save_gcode names the printer by ORCA_PRINTER_ID; the fork maps PRINTER_ID onto it
+    import importlib
     _env(monkeypatch, tmp_path)
+    monkeypatch.delenv("ORCA_PRINTER_ID", raising=False)
     monkeypatch.setenv("PRINTER_ID", "biqu")
+    importlib.reload(ft)
     from orcaslicer_mcp import server as srv
     ft._ensure_store()
     saved = await srv.save_gcode("box.gcode")

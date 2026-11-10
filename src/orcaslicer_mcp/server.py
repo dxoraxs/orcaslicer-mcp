@@ -2560,8 +2560,6 @@ _TOOL_ANNOTATIONS: dict[str, tuple[str, bool, bool]] = {
     "check_printer_match": ("Check the profile against the printer", True, False),
 }
 
-from . import fork_tools  # noqa: E402,F401  dxoraxs fork: registers fork-only tools
-
 
 # Tools that reach outside OrcaSlicer (the printer on the network), and tools that are safe to repeat
 # although they write local state.

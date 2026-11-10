@@ -28,7 +28,7 @@ Funding = "https://buymeacoffee.com/maxellis"
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "respx>=0.21"]
 
 [project.scripts]
-orcaslicer-mcp = "orcaslicer_mcp.server:main"
+orcaslicer-mcp = "orcaslicer_mcp.fork_tools:main"
 
 [build-system]
 requires = ["hatchling"]
