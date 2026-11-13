@@ -16,6 +16,11 @@ release plus the changes below.
 - `sync_print_outcomes()`: pulls finished jobs from Moonraker history into the outcome store,
   joined to their slices, so `recall_prints` shows real results; `set_print_verdict(verdict)`
   attaches the user's words to the last print.
+- `create_calibration(kind, start, end, step, ...)`: the Calibration menu without its dialog
+  (temperature tower, flow rate, PA tower/line/pattern, max volumetric speed, retraction), built
+  by OrcaSlicer itself for the selected presets. Needs the dxoraxs OrcaSlicer build with
+  `POST /api/v1/calibration` (branch `dx/calibration-route` of dxoraxs/OrcaSlicer); other builds
+  answer "not available".
 - `fork_info()`: the running version (`<upstream>+dx`) and the fork tools.
 - No token in the MCP config needed: without `ORCA_API_TOKEN` the token is read from
   OrcaSlicer.conf (`ORCA_CONF_PATH` overrides the location).

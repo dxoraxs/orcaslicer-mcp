@@ -11,7 +11,7 @@ import shlex
 import sqlite3
 from contextlib import closing
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field
 
@@ -177,6 +177,74 @@ async def set_print_verdict(
     return _outcomes.set_verdict(verdict, gcode_filename)
 
 
+CalibrationKind = Literal["temp_tower", "flow_rate", "pa_tower", "pa_line", "pa_pattern",
+                          "max_volumetric", "retraction"]
+
+
+def _calibration_err(e: ApiError) -> dict:
+    if isinstance(e, NotFound) and e.route_missing:
+        return {"error": "not available on this OrcaSlicer build",
+                "hint": f"needs the dxoraxs OrcaSlicer build with POST /api/v1/calibration ({ORCA_FORK_RELEASES})"}
+    out = _err(e)
+    if not out.get("errors"):
+        out.pop("errors", None)
+    body = getattr(e, "body", None) or {}
+    for k in ("detail", "modified", "project"):
+        if k in body:
+            out[k] = body[k]
+    return out
+
+
+async def create_calibration(
+    kind: Annotated[CalibrationKind, Field(description=(
+        "The test, as in OrcaSlicer's Calibration menu: temp_tower (temperature tower), flow_rate, "
+        "pa_tower / pa_line / pa_pattern (pressure advance), max_volumetric (max volumetric speed), "
+        "retraction (retraction tower)."))],
+    start: Annotated[float | None, Field(description=(
+        "First value: °C for temp_tower (the hottest, bottom block), PA, mm³/s, or mm of retraction. "
+        "Omitted: the menu's default."))] = None,
+    end: Annotated[float | None, Field(description=(
+        "Last value: °C for temp_tower (the coldest, top block; at least 5 below start), PA, mm³/s, mm."))] = None,
+    step: Annotated[float | None, Field(description=(
+        "Step for pa_*, max_volumetric and retraction. temp_tower always steps 5 °C."))] = None,
+    flow_pass: Annotated[int | None, Field(description="flow_rate only: pass 1 (coarse) or 2 (fine).")] = None,
+    linear: Annotated[bool | None, Field(description=(
+        "flow_rate only: true = Orca YOLO (linear) flow test, false = classic pass 1/2."))] = None,
+    pattern: Annotated[Literal["archimedean", "monotonic"] | None, Field(description=(
+        "flow_rate only: top surface pattern of the test pads."))] = None,
+    print_numbers: Annotated[bool | None, Field(description="pa_line only: print the PA values.")] = None,
+    accelerations: Annotated[list[float] | None, Field(description="pa_pattern only: accelerations, mm/s².")] = None,
+    speeds: Annotated[list[float] | None, Field(description="pa_pattern only: speeds, mm/s.")] = None,
+    nozzle_based_resize: Annotated[bool | None, Field(description=(
+        "temp_tower only: scale the tower to the nozzle (default true, as in the menu)."))] = None,
+    if_unsaved: Annotated[Literal["save", "discard", "fail"], Field(description=(
+        "The test replaces the open project. Unsaved changes: 'fail' (default) refuses, 'save' "
+        "saves to its path first, 'discard' drops them."))] = "fail",
+    if_preset_changes: Annotated[Literal["discard", "fail"], Field(description=(
+        "Edited, unsaved presets: 'fail' (default) refuses and lists them in modified, 'discard' "
+        "drops the edits. Save a preset with save_preset to keep it."))] = "fail",
+) -> dict:
+    """Create a calibration test exactly as OrcaSlicer's Calibration menu does, without its dialog:
+    a new project with the test model, its settings, and the per-height value (temperature, PA,
+    speed, retraction) that OrcaSlicer applies while slicing. Select the printer, filament and
+    process presets first: the test is built for them. Then slice and show the preview to the user;
+    print only after the user confirms. Needs the dxoraxs OrcaSlicer build."""
+    body: dict = {"kind": kind}
+    for key, value in (("start", start), ("end", end), ("step", step), ("pass", flow_pass),
+                       ("linear", linear), ("pattern", pattern), ("print_numbers", print_numbers),
+                       ("accelerations", accelerations), ("speeds", speeds),
+                       ("nozzle_based_resize", nozzle_based_resize)):
+        if value is not None:
+            body[key] = value
+    body["if_unsaved"] = if_unsaved
+    body["if_preset_changes"] = if_preset_changes
+    try:
+        async with _client() as c:
+            return await c._request("POST", "/api/v1/calibration", json=body, timeout=130.0)
+    except ApiError as e:
+        return _calibration_err(e)
+
+
 async def fork_info() -> dict:
     """Which build of this MCP server is running: the upstream version it is based on, the
     fork, and the fork-only tools it adds."""
@@ -190,6 +258,7 @@ _FORK_TOOLS = {
     printer_status: ("Printer status (Moonraker)", True, False),
     sync_print_outcomes: ("Sync print results from Moonraker", False, False),
     set_print_verdict: ("Record verdict on a print", False, False),
+    create_calibration: ("Create a calibration test (Calibration menu)", False, True),
     fork_info: ("Fork build info", True, False),
 }
 

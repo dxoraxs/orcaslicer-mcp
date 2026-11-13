@@ -2,7 +2,8 @@
 import orcaslicer_mcp.server as srv
 from orcaslicer_mcp import fork_tools as ft
 
-NAMES = ["send_to_printer", "printer_status", "sync_print_outcomes", "set_print_verdict", "fork_info"]
+NAMES = ["send_to_printer", "printer_status", "sync_print_outcomes", "set_print_verdict", "create_calibration",
+         "fork_info"]
 
 
 async def test_fork_info():
